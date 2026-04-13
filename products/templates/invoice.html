@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+    <h2>Invoice Generated</h2>
+
+    <p>Hello Customer,</p>
+    <p>Your bill has been generated successfully.</p>
+
+    <p><strong>Invoice ID:</strong> {{ invoice_id }}</p>
+    <p><strong>Email:</strong> {{ customer_email }}</p>
+    <p><strong>Date:</strong> {{ transaction_time }}</p>
+
+    <table border="1" cellpadding="8" cellspacing="0" width="100%">
+        <thead>
+            <tr>
+                <th>Product ID</th>
+                <th>Name</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Tax</th>
+                <th>Total</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for item in products_list %}
+            <tr>
+                <td>{{ item.product_id }}</td>
+                <td>{{ item.product_name }}</td>
+                <td>Rs. {{ item.unit_price|floatformat:2 }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>Rs. {{ item.tax_amount|floatformat:2 }}</td>
+                <td>Rs. {{ item.total_price|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <br>
+
+    <p><strong>Subtotal:</strong> Rs. {{ subtotal|floatformat:2 }}</p>
+    <p><strong>Total Tax:</strong> Rs. {{ total_tax|floatformat:2 }}</p>
+    <p><strong>Grand Total:</strong> Rs. {{ total_amount }}</p>
+    <p><strong>Paid:</strong> Rs. {{ amount_paid }}</p>
+    <p><strong>Balance:</strong> Rs. {{ balance_amount }}</p>
+
+    <br>
+    <p>Thank you for shopping with us.</p>
+</body>
+</html>
