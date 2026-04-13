@@ -1,6 +1,7 @@
 import logging
+from threading import Thread
 from decimal import Decimal
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
@@ -12,6 +13,23 @@ from .tasks import send_bill_email_task
 from .utils import get_change_breakdown
 
 logger = logging.getLogger(__name__)
+
+
+def _queue_invoice_email(email, payload):
+    """Queue email task off the request thread."""
+    try:
+        send_bill_email_task.delay(email, payload)
+        logger.info(
+            "Invoice email task queued for %s (%s)",
+            email,
+            payload.get("invoice_id"),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to queue invoice email for %s (%s)",
+            email,
+            payload.get("invoice_id"),
+        )
 
 class GenerateBillView(APIView):
     """ Create bill, update stock, persist history, queue invoice email """
@@ -45,10 +63,27 @@ class GenerateBillView(APIView):
             invoice_id,
         )
 
-        # Lock product rows so two requests cannot oversell the same stock.
-        db_products = Product.objects.select_for_update().filter(
-            product_id__in=product_ids
-        )
+        # Fail fast if another request is already holding these rows.
+        try:
+            db_products = Product.objects.select_for_update(
+                nowait=True
+            ).filter(
+                product_id__in=product_ids
+            )
+        except DatabaseError:
+            logger.warning(
+                "Generate bill lock conflict for products: %s",
+                product_ids,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "Another billing request is in progress for one or "
+                        "more selected products. Please retry."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         product_map = {p.product_id: p for p in db_products}
 
         detailed = []
@@ -132,26 +167,24 @@ class GenerateBillView(APIView):
             for row in detailed
         ]
 
-        # Queue email task after transaction commits
-        send_bill_email_task.delay(
-            email,
-            {
-                "invoice_id": invoice_id,
-                "customer_email": email,
-                "transaction_time": bill.transaction_time.isoformat(),
-                "products_list": email_line_items,
-                "subtotal": float(round(subtotal, 2)),
-                "total_tax": float(round(total_tax, 2)),
-                "total_amount": str(total_amount),
-                "amount_paid": str(paid),
-                "balance_amount": str(balance),
-            },
-        )
-
-        logger.info(
-            "Invoice email task queued for %s (%s)",
-            email,
-            invoice_id,
+        email_task_payload = {
+            "invoice_id": invoice_id,
+            "customer_email": email,
+            "transaction_time": bill.transaction_time.isoformat(),
+            "products_list": email_line_items,
+            "subtotal": float(round(subtotal, 2)),
+            "total_tax": float(round(total_tax, 2)),
+            "total_amount": str(total_amount),
+            "amount_paid": str(paid),
+            "balance_amount": str(balance),
+        }
+        # Publish only after commit so broker delays cannot hold row locks.
+        transaction.on_commit(
+            lambda: Thread(
+                target=_queue_invoice_email,
+                args=(email, email_task_payload),
+                daemon=True,
+            ).start()
         )
 
         return Response(

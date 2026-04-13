@@ -278,7 +278,8 @@ export default function App() {
       const response = await axios.get(
         `${BackendUrl}/bills/customer/${encodeURIComponent(
           email
-        )}/`
+        )}/`,
+        { timeout: 10000 }
       );
 
       setPurchaseHistory(response.data || []);
@@ -294,6 +295,8 @@ export default function App() {
 
   /** Submit bill */
   const handleSubmit = async () => {
+    if (submitting) return;
+
     const errors = validateBillForm({
       customerEmail,
       products,
@@ -343,12 +346,14 @@ export default function App() {
     try {
       const response = await axios.post(
         `${BackendUrl}/generate-bill/`,
-        payload
+        payload,
+        { timeout: 15000 }
       );
 
       setBillResult(response.data || null);
 
-      await fetchPurchases(customerEmail);
+      // Do not block submit completion on history refresh.
+      fetchPurchases(customerEmail);
 
       setCustomerEmail("");
       setProducts([
